@@ -1,0 +1,49 @@
+DATABASE: dev
+USER: gpadmin
+HOST: mdw
+PORT: 6432
+KAFKA:
+   INPUT:
+     SOURCE:
+        BROKERS: sdw2:9092
+        TOPIC: weblog.stag_weblog_data
+     COLUMNS:
+        - NAME: uqid
+          TYPE: text
+        - NAME: userid
+          TYPE: text
+        - NAME: eid 
+          TYPE: int
+        - NAME: log_tm 
+          TYPE: timestamp
+        - NAME: peid
+          TYPE: int
+        - NAME: dt
+          TYPE: int
+        - NAME: ip
+          TYPE: text
+     FORMAT: csv
+     ERROR_LIMIT: 125
+   OUTPUT:
+     SCHEMA: weblog
+     TABLE: stag_weblog_data
+     MAPPING:
+        - NAME: uqid
+          EXPRESSION: uqid
+        - NAME: userid
+          EXPRESSION: userid
+        - NAME: eid
+          EXPRESSION: eid
+        - NAME: log_tm
+          EXPRESSION: log_tm
+        - NAME: peid
+          EXPRESSION: peid
+        - NAME: dt
+          EXPRESSION: dt
+        - NAME: ip
+          EXPRESSION: ip
+   COMMIT:
+      MINIMAL_INTERVAL: 1000
+   TASK:
+      POST_BATCH_SQL: select weblog.sp_weblog_sum_user_dd(); 
+      BATCH_INTERVAL: 1 
