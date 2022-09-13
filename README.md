@@ -8,8 +8,10 @@
    - GPSS에서 polling 시간은 Default는 1초이지만, 0.1초까지 설정 변경 가능
    - 데이터 트랜잭션은 Data Ingestion과 변환까지 하나의 트랜잭션으로 묶음.
 3. Data Flow
-   Kafka -> GPSS -> 스트림 데이터를 Greenplum의 웹로그 테이블에 적재
-                 -> 스트림 데이터를 Greenplum에서 가공하여 테이블에 적재(weblog.sp_weblog_sum_user_dd 프로시저에서 가공)     
+   Kafka -> GPSS -> weblog.stag_weblog_data (kafka 스트림 데이터의 staging 테이블에 적재)
+                 -> weblog.sp_weblog_sum_user_dd() 프로시저 호출
+                    -> weblog.weblog_data 데이터 적재: 웹로그 raw 데이터 적재: 
+                    -> weblog.weblog_sum_user_dd 데이터 적재: 일자별,유저별 웹로그 가공(weblog.sp_weblog_sum_user_dd 프로시저에서 가공)
 ```
 
 ### 파일 및 경로 설명
@@ -180,6 +182,59 @@ GROUP BY to_char(log_tm, 'yyyymmdd')
        , b.d1, b.d2, b.d3
 order by 1, 2, 3, 4, 5
 ;
+```
 
-
+### yaml 파일 설명
+```
+[gpadmin@mdw gpsspoc]$ cat weblog.stag_weblog_data.yaml
+DATABASE: dev    ### 데이터베이스명
+USER: gpadmin    ### 사용 유저
+HOST: mdw        ### Greenplum 호스트명
+PORT: 6432       ### Greenplum 마스터 Port, 보통 5432이며, 포트 확인 필요
+KAFKA:
+   INPUT:
+     SOURCE:
+        BROKERS: sdw2:9092      ### Kafka 브로커 호스트명:포트
+        TOPIC: weblog.stag_weblog_data ### kafka 토픽이름
+     COLUMNS:
+        - NAME: uqid            ### 토픽 컬럼명, Greenplum에서 사용하기 위함
+          TYPE: text            ### 토픽 컬럼 Data Type, Greenplum에서 사용하기 위함
+        - NAME: userid
+          TYPE: text
+        - NAME: eid
+          TYPE: int
+        - NAME: log_tm
+          TYPE: timestamp
+        - NAME: peid
+          TYPE: int
+        - NAME: dt
+          TYPE: int
+        - NAME: ip
+          TYPE: text
+     FORMAT: csv                ### 토픽 포맷, csv, json 등 다양한 포맷 사용 가능
+     ERROR_LIMIT: 125           ### 에러 limit 개수 설정, 0건 에러일 경우에는 해당 옵션 삭제하면 됨.
+   OUTPUT:
+     SCHEMA: weblog             ### Greenplum에 적재할 스키마명
+     TABLE: stag_weblog_data    ### Greenplum에 적재할 테이블 명
+     MAPPING:                   ### kafka 토픽과 Greenplum에서 적재할 때 맵핑
+        - NAME: uqid            ### Greenplum 테이블에 적재되는 컬럼명
+          EXPRESSION: uqid      ### kafka 토픽에서 사용되는 이름, substr()과 같은 함수 적용 가능
+        - NAME: userid
+          EXPRESSION: userid
+        - NAME: eid
+          EXPRESSION: eid
+        - NAME: log_tm
+          EXPRESSION: log_tm
+        - NAME: peid
+          EXPRESSION: peid
+        - NAME: dt
+          EXPRESSION: dt
+        - NAME: ip
+          EXPRESSION: ip
+   COMMIT:
+      MINIMAL_INTERVAL: 1000    ### kafka 메시지를 Greenplum에 적재시 간격 (ms)
+   TASK:
+      POST_BATCH_SQL: select weblog.sp_weblog_sum_user_dd();   ### kafka 메시지 적재 후 호출되는 프로시저, 함수까지 하나의 트랜잭션, 여기에서 데이터 가공 함.
+      BATCH_INTERVAL: 1
+[gpadmin@mdw gpsspoc]$
 ```

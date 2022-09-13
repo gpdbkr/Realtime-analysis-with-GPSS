@@ -11,6 +11,7 @@ CREATE TABLE weblog.weblog_menu
 )
 distributed BY (eid);
 
+
 --Weblog 샘플 데이터 (증분 전) 
 --Drop TABLE weblog.weblog_data_base;
 CREATE TABLE weblog.weblog_data_base
@@ -26,6 +27,20 @@ CREATE TABLE weblog.weblog_data_base
 )
 distributed by (userid)
 ;
+
+--kafka 토픽이 임시 저장되는 staging 테이블
+--drop TABLE weblog.stag_weblog_data;
+CREATE TABLE weblog.stag_weblog_data
+(
+   UqID VARCHAR,    -- userid 암호화
+   userid VARCHAR,  -- userid
+   eid    int,           --메뉴 ID
+   log_tm timestamp,     --로그 적재시각
+   peid   int,           --이전 메뉴 ID
+   dt     int,           --체류 시간 (초)
+   ip     VARCHAR   --IP 
+)
+distributed by (userid);
 
 --Weblog 적재 테이블 (증분 후)
 --drop TABLE weblog.weblog_data;
