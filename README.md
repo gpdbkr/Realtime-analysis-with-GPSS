@@ -107,27 +107,6 @@ weblog.stag_weblog_data             5ea72e6f86009c94a17c297ae1efa70a    mdw     
 
 9. 데이터 적재 현황 확인 (Greenplum 마스터에서 수행)
 [gpadmin@mdw gpsspoc]$ ./check.sh
-1
-2
-3
-
-2022-09-13 01:27:53
-===================================
-Number of table rows
------------------------------------
-     STAGING :         50,000
-  PROCESSING :      2,650,000
-FINAL RESULT :         77,578
-===================================
-Performance Summary
------------------------------------
-         TPS : 22,284
-  TOTAL ROWS : 2,650,000
-ELAPSED TIME : 00:01:58.915675
-   BEGINNING : 2022-09-13 01:25:51
-     LASTEST : 2022-09-13 01:27:50
-===================================
-
 [gpadmin@mdw gpsspoc]$ while true; do date; ./check.sh ; sleep 5;done
 2022. 09. 13. (화) 01:28:29 EDT
 1
