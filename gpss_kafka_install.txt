@@ -1,0 +1,235 @@
+Greenplum Stream Server
+
+1. Greenplum Streaming Server 설치
+  1) GPSS 다운로드
+     - network.pivotal.io 
+     - Greenplum Streaming Server 에서 패키지 다운로드
+
+  2) GPSS 설치 파일
+     - gpss-gpdb6-1.3.4-rhel7-x86_64.gppkg    : Greenplum 클러스터 모든 노드에 설치 하는 설치 파일 (예시에는 이것으로 설치)
+     - gpss-gpdb6-1.3.4-rhel7-x86_64.tar.gz   : 단일 호스트의 Greenplum Database에 설치 파일
+     - gpss-gpdb6-1.3.4-rhel7-x86_64.rpm      : ETL서버에서 설치시 사용되는 설치. 파일
+      ==> gppkg와 tar.gz 패키지는 GPSS를 위하여 필요한 라이브러리 및 실행파일, 스크립트 파일 
+      ==> rpm 파일은 클라이언트 측 실행 파일, ETL 런타임 환경을 썰정하기 위한 용도
+
+  3) 설치 프로그램
+     - gpkafka :  단일 Greenplum-Kafka 커넥터를 이용하여 Kafka data를 Greenplum에 적재
+     - gpss    :  GPSS 인스턴스 구동
+     - gpsscli :  GPSS 데이터 로드 잡을 관리 (submit, start, stop 등), 현재는 Kafka 데이터 소스만 지원
+     - kafkacat:  kafka 테스트 및 디버그 유틸리티
+  
+  4) Greenplum 마스터 서버에서 gpss 설치
+     - Greenplum 프로세스가 떠 있는 상태에서 수행해야 함.
+     - 파일 복제
+     $ ssh gpadmin@mdw
+     $ . /usr/local/greenplum-db/greenplum_path.sh
+     $ gppkg -i gpss-gpdb6-1.3.4-rhel7-x86_64.gppkg
+     $ psql
+       gpadmin=# CREATE EXTENSION gpss;
+       CREATE EXTENSION
+       Time: 230.853 ms
+       gpadmin=#\q
+     $
+
+2. Kafka 설치 (kafka 서버)
+   1) zookeeper 설치 
+      # su - root
+      # cd /root
+      # wget https://downloads.apache.org/zookeeper/zookeeper-3.6.0/apache-zookeeper-3.6.0-bin.tar.gz
+      # cd /usr/local
+      # tar zxvf /root/apache-zookeeper-3.6.0-bin.tar.gz
+      # chown -R gpadmin:gpadmin apache-zookeeper-3.6.0-bin/
+      # ln -s apache-zookeeper-3.6.0-bin zookeeper      
+      # mkdir /zdata
+      # echo 1 > /zdata/myid
+      # cd /usr/local/zookeeper/conf/
+      # cp zoo_sample.cfg zoo.cfg
+      # vi zoo.cfg
+        #dataDir=/tmp/zookeeper             ###<< 아래 라인으로 수정
+        dataDir=/zdata
+        server.1=localhost:2888:3888        ###<< 라인 추가
+
+      # chown -R gpadmin:gpadmin /zdata
+      # chown -R gpadmin:gpadmin /usr/local/zookeeper*        
+
+   2) zookeeper 기동
+      $ su - gpadmin
+      $ /usr/local/zookeeper/bin/zkServer.sh start
+      .........
+      /usr/bin/java
+      ZooKeeper JMX enabled by default
+      Using config: /usr/local/zookeeper/bin/../conf/zoo.cfg
+      Starting zookeeper ... STARTED
+      .........
+      - 상태 확인
+      $ /usr/local/zookeeper/bin/zkServer.sh status
+      - 중지
+      $ /usr/local/zookeeper/bin/zkServer.sh stop
+
+
+   3) kafka 설치
+      # cd /root
+      # wgets http://apache.mirror.cdnetworks.com/kafka/2.4.1/kafka_2.13-2.4.1.tgz
+      # tar zxvf /root/kafka_2.13-2.4.1.tgz
+      # ln -s kafka_2.13-2.4.1 kafka
+      # mkdir /kdata1 /kdata2
+      # chown -R gpadmin:gpadmin /kdata*
+      # vi /usr/local/kafka/config/server.properties
+        #broker.id=0                       ###<< 아래 라인으로 수정
+        broker.id=1
+
+        #log.dirs=/tmp/kafka-logs          ###<< 아래 라인으로 수정
+        log.dirs=/kdata1,/kdata2
+
+        #zookeeper.connect=localhost:2181                ###<< 아래 라인으로 수정
+        zookeeper.connect=localhost:2181/greenplum-kafka
+
+      # chown -R gpadmin:gpadmin kafka*
+
+   4) kafka 기동
+      - 기동
+      $ su - gpadmin
+      $ /usr/local/kafka/bin/kafka-server-start.sh -daemon /usr/local/kafka/config/server.properties
+      - 중지
+      $ /usr/local/kafka/bin/kafka-server-stop.sh
+
+
+3. kafka / greenplum 연동 테스트
+  1) Greenplum 서버
+     - Test DB 생성
+     $ createdb testdb
+     $ psql testdb -c "CREATE TABLE data_from_kafka( customer_id int8, expenses decimal(9,2), tax_due decimal(7,2)) distributed by (customer_id)"
+  
+  2) kafka 서버 
+    - 방화벽 비활성화 
+    # systemctl stop firewalld
+
+    - 테스트 데이터 
+    $ vi /tmp/sample_data.csv
+"1313131","12","1313.13"
+"3535353","11","761.35"
+"7979797","10","4489.00"
+"7979797","11","18.72"
+"3535353","10","6001.94"
+"7979797","12","173.18"
+"1313131","10","492.83"
+"3535353","12","81.12"
+"1313131","11","368.27"
+
+
+  3) kafka 토픽 생성 및 확인
+    - 토픽생성
+          $ /usr/local/kafka/bin/kafka-topics.sh --zookeeper localhost:2181/greenplum-kafka --topic topic_for_gpkafka --partitions 1 --replication-factor 1 --create
+          Created topic topic_for_gpkafka.
+
+    - 확인
+          $ /usr/local/kafka/bin/kafka-topics.sh --list --zookeeper localhost:2181/greenplum-kafka
+          topic_for_gpkafka
+
+    - 참고, 토픽 삭제
+          $ /usr/local/kafka/bin/kafka-topics.sh --zookeeper localhost:2181/greenplum-kafka --topic topic_for_gpkafka --delete
+
+    - 토픽에 데이터 적재
+          $ /usr/local/kafka/bin/kafka-console-producer.sh --broker-list localhost:9092 --topic topic_for_gpkafka < /tmp/sample_data.csv
+        
+    - 카프카 적재된 데이터 확인
+          $ /usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic  topic_for_gpkafka --from-beginning
+
+
+  4) gpkafka 구성 (Greenplum 서버)
+     - kafka load 구성파일 설정
+     $ vi /home/gpadmin/loadcfg.yaml
+[gpadmin@mdw ~]$ vi /home/gpadmin/loadcfg.yaml
+DATABASE: testdb
+USER: gpadmin
+HOST: mdw
+PORT: 5432
+KAFKA:
+   INPUT:
+     SOURCE:
+        BROKERS: kafka:9092
+        TOPIC: topic_for_gpkafka
+     COLUMNS:
+        - NAME: cust_id
+          TYPE: int
+        - NAME: __IGNORED__
+          TYPE: int
+        - NAME: expenses
+          TYPE: decimal(9,2)
+     FORMAT: csv
+     ERROR_LIMIT: 125
+   OUTPUT:
+     TABLE: data_from_kafka
+     MAPPING:
+        - NAME: customer_id
+          EXPRESSION: cust_id
+        - NAME: expenses
+          EXPRESSION: expenses
+        - NAME: tax_due
+          EXPRESSION: expenses * .0725
+   COMMIT:
+     MINIMAL_INTERVAL: 100
+[gpadmin@mdw ~]$ 
+
+  5) gpkafka로 데이터 로드 (Greenplum mdw 서버)
+       - 1회 수행
+       $ gpkafka load --quit-at-eof ./loadcfg.yaml  
+
+[gpadmin@mdw ~]$ gpkafka load --quit-at-eof ./loadcfg.yaml
+20200401:18:05:11 gpkafka:gpadmin:mdw:103524-[INFO]:-gpfdist listening on 0.0.0.0:8080
+20200401:18:05:11 gpkafka:gpadmin:mdw:103524-[INFO]:-External table "public"."gpkafkaloadext_be1c95c0f2b8cbddcdc1ba51d401d4d4" already exist, reuse.
+20200401:18:05:11 gpkafka:gpadmin:mdw:103524-[INFO]:-Start job f840edb3c9eeb3f3ffd569364e6bd5a7: input<broker:etl:9092 topic:topic_for_gpkafka>, output<host:mdw db:testdb table:"public"."data_from_kafka">
+20200401:18:05:11 gpkafka:gpadmin:mdw:103524-[INFO]:-gpkafka job has started
+StartTime     EndTime       MsgNum    MsgSize   InsertedRecords RejectedRecords Speed
+2020-04-01T09:05:11.923504Z 2020-04-01T09:05:12.163744Z 9           217             9           0           903B/sec
+2020-04-01T09:05:12.209568Z 2020-04-01T09:05:12.225395Z 0           0               0           0           0B/sec
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Job finished: f840edb3c9eeb3f3ffd569364e6bd5a7
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Target table: "public"."data_from_kafka"
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Inserted 9 rows
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Rejected 0 rows
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Broker: etl:9092
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Topic: topic_for_gpkafka
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Partition 0 at offset 8
+20200401:18:05:12 gpkafka:gpadmin:mdw:103524-[INFO]:-Job f840edb3c9eeb3f3ffd569364e6bd5a7, status JOB_STOPPED, errmsg [], time 2020-04-01T09:05:12.247960173Z
+[gpadmin@mdw ~]$
+
+       - 연속 대기
+       $ gpkafka load ./loadcfg.yaml      ### 포그라운드 수행
+       $ gpkafka load ./loadcfg.yaml > /home/gpadmin/log/loadcfg.yaml.out 2>&1 &  ### 백그라운드 수행
+
+
+  6) gpss 관련 command
+       - Job 등록
+       [gpadmin@mdw gpss]$ gpsscli submit --name data_from_kafka /home/gpadmin/gpss/loadcfg.yaml --gpss-port 50007
+       20220912 21:28:36 [INFO] JobID: cd5397461f9dd4834ba4da9cfb130929,JobName: data_from_kafka
+       
+       - job 리스트 확인
+       [gpadmin@mdw gpss]$ gpsscli list --all  --gpss-port 50007
+       JobName                             JobID                               GPHost          GPPort  DataBase        Schema          Table                                  Topic           Status
+       data_from_kafka                     cd5397461f9dd4834ba4da9cfb130929    mdw             6432    dev             public          data_from_kafka                        topic_for_gpkafkaJOB_SUBMITTED
+       
+       - Job Start
+       [gpadmin@mdw gpss]$ gpsscli start data_from_kafka --gpss-port 50007
+       20220912 21:29:32 [INFO] Job data_from_kafka is started
+       
+       - Job Start 후 리스트 확인(running 상황 확인)
+       [gpadmin@mdw gpss]$ gpsscli list --all  --gpss-port 50007
+       JobName                             JobID                               GPHost          GPPort  DataBase        Schema          Table                                  Topic           Status
+       data_from_kafka                     cd5397461f9dd4834ba4da9cfb130929    mdw             6432    dev             public          data_from_kafka                        topic_for_gpkafkaJOB_RUNNING
+       
+       - Job Stop
+       [gpadmin@mdw gpss]$ gpsscli stop data_from_kafka --gpss-port 50007
+       20220912 21:30:15 [INFO] stop job: data_from_kafka success
+       
+       - Job 삭제 
+       [gpadmin@mdw gpss]$ gpsscli remove data_from_kafka --gpss-port 50007
+       20220912 21:30:38 [INFO] Remove job data_from_kafka successfully
+       JobName                             JobID                               Result  Reason
+       data_from_kafka                     cd5397461f9dd4834ba4da9cfb130929    success
+       
+       - Job 삭제 후 리스트 확인
+       [gpadmin@mdw gpss]$ gpsscli list --all  --gpss-port 50007
+       JobName                             JobID                               GPHost          GPPort  DataBase        Schema          Table                                  Topic           Status
+
+
+
