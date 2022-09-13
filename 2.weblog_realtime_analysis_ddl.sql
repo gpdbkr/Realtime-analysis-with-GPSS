@@ -339,3 +339,67 @@ BEGIN
 $$
 language plpgsql;
 
+
+--실시간으로 들어오는 kafka토픽을 Greenplum에 적재 및 유저별로 가공하는 프로시져 
+--weblog.stag_weblog_data.yaml 설정에서 호출, 이벤트 호출은 gpss에서 수행
+--실시간으로 들어오는 kafka 토픽은 gpss를 통해 weblog.stag_weblog_data 에 적재
+--raw 데이터 저장을 위하여 weblog.weblog_data 저장  
+--weblog.stag_weblog_data에 적재된 데이터를 일자별, user 별로 가공 (array_agg 수행)
+
+create or replace function weblog.sp_weblog_sum_user_dd()
+returns int
+AS
+$$
+declare 
+          v_rows int;
+begin 
+          set optimizer=off;
+          set enable_nestloop=on;
+          set random_page_cost=0;
+          
+          INSERT INTO weblog.weblog_data
+                (uqid, userid, eid, log_tm, peid, dt, ip, last_update)
+          select uqid, userid, eid, log_tm, peid, dt, ip, now() 
+          from weblog.stag_weblog_data;
+          
+          drop table if exists real_time_sum_user_dd;
+          create temp table real_time_sum_user_dd
+          as 
+          select to_char(log_tm, 'yyyymmdd') log_dt, userid
+               , array_agg(log_tm order by log_tm) log_tm_arr
+               , array_agg(eid order by log_tm) eid_arr
+               , array_agg(dt order by log_tm)  dt_arr
+          from   weblog.stag_weblog_data
+          group by 1, 2
+          distributed by (userid);
+        
+          get diagnostics v_rows := row_count; 
+          
+          update weblog.weblog_sum_user_dd a 
+          set    log_tm_arr = a.log_tm_arr||b.log_tm_arr
+               , eid_arr    = a.eid_arr   ||b.eid_arr
+               , dt_arr     = a.dt_arr    ||b.dt_arr 
+               , last_update = now()
+          from  real_time_sum_user_dd b
+          where a.log_dt = b.log_dt
+          and   a.userid = b.userid;
+         
+          insert into weblog.weblog_sum_user_dd
+          (log_dt, userid, log_tm_arr, eid_arr, dt_arr,last_update)
+          select a.log_dt, a.userid, a.log_tm_arr, a.eid_arr, a.dt_arr, now()
+          from   real_time_sum_user_dd a
+          left outer join weblog.weblog_sum_user_dd b 
+          on   a.log_dt = b.log_dt
+          and  a.userid = b.userid
+          where b.log_dt is null 
+          and   b.userid is null
+         ;  
+         
+         delete from weblog.stag_weblog_data;
+       
+         return v_rows;
+        
+ end;
+$$
+language plpgsql;
+

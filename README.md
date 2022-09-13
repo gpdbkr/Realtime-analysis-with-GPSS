@@ -9,7 +9,7 @@
    - 데이터 트랜잭션은 Data Ingestion과 변환까지 하나의 트랜잭션으로 묶음.
 3. Data Flow
    Kafka -> GPSS -> 스트림 데이터를 Greenplum의 웹로그 테이블에 적재
-                 -> 스트림 데이터를 Greenplum에서 가공하여 테이블에 적재     
+                 -> 스트림 데이터를 Greenplum에서 가공하여 테이블에 적재(weblog.sp_weblog_sum_user_dd 프로시저에서 가공)     
 ```
 
 ### 파일 및 경로 설명
@@ -17,7 +17,7 @@
 README.md
 1.gpss_kafka_install.txt : gpss & kafka 설치 및 연동 테스트 스크립트
 2.weblog_realtime_analysis_ddl.sql : 웹로그 샘플 데이터 생성을 위한 DDL 스크립트
-3.weblog_data_generation_dml.sql.  : 웹로그 샘플 데이터 생성을 위한 DML 스크립트
+3.weblog_data_generation_dml.sql   : 웹로그 샘플 데이터 생성을 위한 DML 스크립트
 
 gpsspoc             : Greenplum 사이드에서 테스트 스크립트
 check.sh            : GPSS 수행되는 동안 TPS  측정
